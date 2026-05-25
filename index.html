@@ -1,34 +1,1247 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 <head>
-    <title>Mes Finances</title>
-    <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-database-compat.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mes Finances · Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght=400;600;700;800&family=DM+Mono:wght=300;400;500&display=swap" rel="stylesheet">
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a26;
+    --border: #2a2a3a;
+    --accent-cic: #00d4aa;
+    --accent-tr: #f0a500;
+    --accent-global: #a78bfa;
+    --accent-debit: #ff4d6d;
+    --accent-credit: #00d4aa;
+    --text: #e8e8f0;
+    --text-muted: #6b6b8a;
+    --text-dim: #3a3a55;
+    --font-display: 'Syne', sans-serif;
+    --font-mono: 'DM Mono', monospace;
+    --radius: 16px;
+    --radius-sm: 8px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-display);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,170,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,170,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .app { position: relative; z-index: 1; max-width: 1200px; margin: 0 auto; padding: 24px 16px 80px; }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  .logo { font-size: 1.4rem; font-weight: 800; letter-spacing: -0.5px; }
+  .logo span { color: var(--accent-cic); }
+
+  .header-date {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+  }
+
+  /* NAVBAR - SYSTÈME D'ONGLETS INTERACTIFS */
+  .tabs-nav {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 32px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 12px;
+  }
+
+  .tab-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 10px 24px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 0.9rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .tab-btn:hover {
+    color: var(--text);
+    border-color: var(--text-muted);
+  }
+
+  .tab-btn.active[data-view="global"] { background: rgba(167, 139, 250, 0.15); color: var(--accent-global); border-color: var(--accent-global); }
+  .tab-btn.active[data-view="CIC"] { background: rgba(0, 212, 170, 0.15); color: var(--accent-cic); border-color: var(--accent-cic); }
+  .tab-btn.active[data-view="TR"] { background: rgba(240, 165, 0, 0.15); color: var(--accent-tr); border-color: var(--accent-tr); }
+
+  /* GESTION DE L'AFFICHAGE DYNAMIQUE */
+  .view-content { display: none; }
+  .view-content.active { display: block; }
+
+  .soldes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+
+  .solde-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.2s, border-color 0.2s;
+  }
+  .solde-card:hover { transform: translateY(-2px); }
+
+  .solde-card.cic { border-top: 3px solid var(--accent-cic); }
+  .solde-card.tr { border-top: 3px solid var(--accent-tr); }
+  .solde-card.total { border-top: 3px solid var(--accent-global); }
+
+  .solde-label { font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; font-family: var(--font-mono); }
+
+  .solde-value { font-size: 2rem; font-weight: 800; font-family: var(--font-mono); letter-spacing: -1px; }
+  .solde-card.cic .solde-value { color: var(--accent-cic); }
+  .solde-card.tr .solde-value { color: var(--accent-tr); }
+  .solde-card.total .solde-value { color: var(--accent-global); }
+
+  .solde-sub { font-size: 0.72rem; color: var(--text-muted); margin-top: 6px; font-family: var(--font-mono); }
+
+  .section-title {
+    font-size: 0.7rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+    margin-top: 24px;
+    font-family: var(--font-mono);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  .charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+
+  .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; }
+  .chart-card h3 { font-size: 0.85rem; font-weight: 600; color: var(--text-muted); margin-bottom: 20px; font-family: var(--font-mono); letter-spacing: 0.05em; }
+  .chart-wrap { position: relative; height: 220px; }
+
+  .form-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px; margin-bottom: 32px; }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 20px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+
+  label { font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); font-family: var(--font-mono); }
+  input, select { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-family: var(--font-mono); font-size: 0.9rem; padding: 10px 14px; outline: none; width: 100%; }
+  input:focus, select:focus { border-color: var(--accent-cic); }
+
+  .btn-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn { padding: 12px 28px; border-radius: var(--radius-sm); border: none; font-family: var(--font-display); font-size: 0.85rem; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+  .btn-primary { background: var(--accent-cic); color: #0a0a0f; }
+  .btn-primary:hover { background: #00f0c0; transform: translateY(-1px); }
+  .btn-secondary { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
+
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+  .filter-chip { padding: 6px 14px; border-radius: 100px; font-size: 0.75rem; font-family: var(--font-mono); border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; }
+  .filter-chip.active { background: var(--text); color: #0a0a0f; border-color: var(--text); font-weight: 600; }
+  .search-input { flex: 1; min-width: 180px; max-width: 300px; padding: 7px 14px; border-radius: 100px; font-size: 0.8rem; }
+
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .table-header { display: grid; grid-template-columns: 100px 1fr 130px 110px 120px 90px 50px; padding: 12px 20px; background: var(--surface2); border-bottom: 1px solid var(--border); font-size: 0.65rem; color: var(--text-dim); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.1em; }
+  .tx-row { display: grid; grid-template-columns: 100px 1fr 130px 110px 120px 90px 50px; padding: 14px 20px; border-bottom: 1px solid var(--border); align-items: center; }
+  .tx-row:last-child { border-bottom: none; }
+  .tx-date { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted); }
+  .tx-desc { font-size: 0.88rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tx-cat { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); }
+  .tx-compte { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.72rem; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .dot-cic { background: var(--accent-cic); }
+  .dot-tr { background: var(--accent-tr); }
+  .tx-montant { font-family: var(--font-mono); font-size: 0.92rem; font-weight: 500; text-align: right; }
+  .tx-montant.debit { color: var(--accent-debit); }
+  .tx-montant.credit { color: var(--accent-credit); }
+  .badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 100px; font-size: 0.65rem; font-family: var(--font-mono); }
+  .badge-debit { background: rgba(255,77,109,0.12); color: var(--accent-debit); }
+  .badge-credit { background: rgba(0,212,170,0.12); color: var(--accent-credit); }
+  .btn-del { border: none; background: transparent; color: var(--text-dim); cursor: pointer; font-size: 1.1rem; }
+  .btn-del:hover { color: var(--accent-debit); }
+
+  .empty-state { padding: 60px 20px; text-align: center; color: var(--text-dim); font-family: var(--font-mono); }
+  .tools-bar { display: flex; gap: 10px; justify-content: flex-end; margin-bottom: 24px; }
+
+  @media (max-width: 768px) {
+    .table-header { display: none; }
+    .tx-row { grid-template-columns: 1fr auto; grid-template-rows: auto auto auto; gap: 4px; padding: 14px 16px; }
+    .tx-date { grid-column: 1; grid-row: 1; }
+    .tx-desc { grid-column: 1; grid-row: 2; }
+    .tx-cat { grid-column: 1; grid-row: 3; }
+    .tx-compte, .tx-statut { display: none; }
+    .tx-montant { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+    .tx-actions { grid-column: 2; grid-row: 3; }
+  }
+
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface2); border: 1px solid var(--accent-cic); color: var(--text); padding: 14px 22px; border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 0.82rem; z-index: 1000; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+  .solde-init-row { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+  .solde-init-row .field { flex: 1; min-width: 180px; }
+
+  /* SOUS-ONGLETS CIC */
+  .cic-sub-nav {
+    display: none;
+    gap: 8px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .cic-sub-nav.visible { display: flex; }
+
+  .sub-tab-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 7px 18px;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.78rem;
+    border-radius: 100px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    letter-spacing: 0.02em;
+  }
+  .sub-tab-btn:hover { color: var(--text); border-color: var(--text-muted); }
+  .sub-tab-btn.active {
+    background: rgba(0, 212, 170, 0.15);
+    color: var(--accent-cic);
+    border-color: var(--accent-cic);
+  }
+
+  /* SECTIONS SOUS-ONGLETS */
+  .cic-section { display: none; }
+  .cic-section.active { display: block; }
+
+  /* CARTES SOLDES LIVRETS */
+  .solde-card.livreta { border-top: 3px solid #38bdf8; }
+  .solde-card.livreta .solde-value { color: #38bdf8; }
+  .solde-card.livretj { border-top: 3px solid #fb923c; }
+  .solde-card.livretj .solde-value { color: #fb923c; }
+
+  /* SYSTÈME D'ENVELOPPES */
+  .enveloppes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+
+  .envelope-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    position: relative;
+    transition: transform 0.2s, border-color 0.2s;
+  }
+  .envelope-card:hover { transform: translateY(-2px); border-color: #38bdf8; }
+
+  .envelope-icon { font-size: 1.4rem; margin-bottom: 10px; }
+  .envelope-name {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .envelope-amount {
+    font-family: var(--font-mono);
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: #38bdf8;
+    letter-spacing: -0.5px;
+  }
+  .envelope-progress {
+    margin-top: 10px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .envelope-progress-bar {
+    height: 100%;
+    background: #38bdf8;
+    border-radius: 2px;
+    transition: width 0.4s ease;
+  }
+  .envelope-goal {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    margin-top: 5px;
+  }
+  .envelope-del {
+    position: absolute;
+    top: 10px; right: 12px;
+    border: none; background: transparent;
+    color: var(--text-dim); cursor: pointer;
+    font-size: 1rem; line-height: 1;
+  }
+  .envelope-del:hover { color: var(--accent-debit); }
+
+  .envelope-add-card {
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-family: var(--font-mono);
+    min-height: 130px;
+  }
+  .envelope-add-card:hover { border-color: #38bdf8; color: #38bdf8; }
+  .envelope-add-icon { font-size: 1.8rem; }
+
+  /* MODAL NOUVELLE ENVELOPPE */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 500;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+    width: 100%;
+    max-width: 420px;
+    position: relative;
+  }
+  .modal-title {
+    font-size: 1rem;
+    font-weight: 800;
+    margin-bottom: 20px;
+    color: #38bdf8;
+  }
+  .modal-close {
+    position: absolute;
+    top: 16px; right: 18px;
+    background: transparent; border: none;
+    color: var(--text-muted); font-size: 1.3rem;
+    cursor: pointer;
+  }
+  .modal-field { margin-bottom: 16px; }
+
+  /* MOUVEMENT SUR LIVRET */
+  .livret-tx-row {
+    display: grid;
+    grid-template-columns: 100px 1fr 150px 120px 50px;
+    padding: 13px 20px;
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+  }
+  .livret-tx-row:last-child { border-bottom: none; }
+
+  @media (max-width: 768px) {
+    .livret-tx-row { grid-template-columns: 1fr auto; grid-template-rows: auto auto; gap: 4px; padding: 12px 16px; }
+  }
+</style>
 </head>
 <body>
-    <h1>Chargement de mes données...</h1>
-    
-    <script>
-        // Configuration
-        const firebaseConfig = {
-            apiKey: "AIzaSyD51xYGMjCna0NosxFGZqD1xdfJ22yT5T6I",
-            authDomain: "mes-finances-1afce.firebaseapp.com",
-            databaseURL: "https://mes-finances-1afce-default-rtdb.europe-west1.firebasedatabase.app/",
-            projectId: "mes-finances-1afce",
-            storageBucket: "mes-finances-1afce.firebasestorage.app",
-            messagingSenderId: "25511596591",
-            appId: "1:25511596591:web:01b123dd17e0ecb859ecda"
-        };
+<div class="app">
 
-        // Connexion
+  <header>
+    <div class="logo">mes<span>·</span>finances</div>
+    <div class="header-date" id="headerDate"></div>
+  </header>
+
+  <nav class="tabs-nav">
+    <button class="tab-btn active" data-view="global" onclick="switchView('global')">Vue Globale</button>
+    <button class="tab-btn" data-view="CIC" onclick="switchView('CIC')">Compte CIC</button>
+    <button class="tab-btn" data-view="TR" onclick="switchView('TR')">Trade Republic</button>
+  </nav>
+
+  <!-- SOUS-ONGLETS CIC -->
+  <nav class="cic-sub-nav" id="cicSubNav">
+    <button class="sub-tab-btn active" data-cic="courant" onclick="switchCicSection('courant', this)">💳 Compte Courant</button>
+    <button class="sub-tab-btn" data-cic="livreta" onclick="switchCicSection('livreta', this)">🏦 Livret A</button>
+    <button class="sub-tab-btn" data-cic="livretj" onclick="switchCicSection('livretj', this)">🌱 Livret Jeune</button>
+  </nav>
+
+  <!-- ======= SECTION COMMUNE : vue global + TR ======= -->
+  <div id="commonView">
+    <div class="section-title">Aperçu financier</div>
+    <div class="soldes-grid">
+      <div class="solde-card cic" id="card_CIC">
+        <div class="solde-label">CIC</div>
+        <div class="solde-value" id="soldeCIC">0,00 €</div>
+        <div class="solde-sub" id="soldeCICSub">-0,00 € / +0,00 €</div>
+      </div>
+      <div class="solde-card tr" id="card_TR">
+        <div class="solde-label">Trade Republic</div>
+        <div class="solde-value" id="soldeTR">0,00 €</div>
+        <div class="solde-sub" id="soldeTRSub">-0,00 € / +0,00 €</div>
+      </div>
+      <div class="solde-card total" id="card_global">
+        <div class="solde-label">Total consolidé</div>
+        <div class="solde-value" id="soldeTotal">0,00 €</div>
+        <div class="solde-sub" id="soldeTotalSub">0 transaction(s)</div>
+      </div>
+    </div>
+
+    <div class="section-title">Analyse graphique</div>
+    <div class="charts-grid">
+      <div class="chart-card">
+        <h3 id="chartCatTitle">Dépenses par catégorie</h3>
+        <div class="chart-wrap"><canvas id="chartCat"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Flux mensuels (6 mois)</h3>
+        <div class="chart-wrap"><canvas id="chartMois"></canvas></div>
+      </div>
+    </div>
+
+    <div class="section-title">Saisie & Gestion</div>
+    <div class="form-card">
+      <div id="initSoldes" style="display:none; margin-bottom:24px; padding-bottom:20px; border-bottom:1px solid var(--border);">
+        <div style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:12px;letter-spacing:0.1em;">SOLDES INITIAUX (à définir une seule fois)</div>
+        <div class="solde-init-row">
+          <div class="field">
+            <label>Solde initial CIC (€)</label>
+            <input type="number" id="initCIC" step="0.01" placeholder="ex: 1500.00">
+          </div>
+          <div class="field">
+            <label>Solde initial Trade Republic (€)</label>
+            <input type="number" id="initTR" step="0.01" placeholder="ex: 3200.00">
+          </div>
+          <div style="display:flex;align-items:flex-end;">
+            <button class="btn btn-secondary" onclick="saveSoldesInit()">Enregistrer</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="field"><label>Date</label><input type="date" id="fDate"></div>
+        <div class="field"><label>Description / libellé</label><input type="text" id="fDesc" placeholder="ex: Saisie manuelle"></div>
+        <div class="field"><label>Montant (€)</label><input type="number" id="fMontant" step="0.01" min="0" placeholder="0.00"></div>
+        <div class="field">
+          <label>Statut</label>
+          <select id="fStatut">
+            <option value="debit">Débit (sortie)</option>
+            <option value="credit">Crédit (entrée)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Compte</label>
+          <select id="fCompte">
+            <option value="CIC">CIC</option>
+            <option value="TR">Trade Republic</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Catégorie</label>
+          <select id="fCat">
+            <option value="Alimentation">🛒 Alimentation</option>
+            <option value="Logement">🏠 Logement</option>
+            <option value="Transport">🚇 Transport</option>
+            <option value="Santé">💊 Santé</option>
+            <option value="Loisirs">🎭 Loisirs</option>
+            <option value="Restaurants">🍽️ Restaurants</option>
+            <option value="Shopping">🛍️ Shopping</option>
+            <option value="Abonnements">📱 Abonnements</option>
+            <option value="Investissement">📈 Investissement</option>
+            <option value="Salaire">💼 Salaire</option>
+            <option value="Remboursement">💸 Remboursement</option>
+            <option value="Autre">📦 Autre</option>
+          </select>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="addTransaction()">+ Ajouter</button>
+        <button class="btn btn-secondary" onclick="resetForm()">Réinitialiser</button>
+      </div>
+    </div>
+
+    <div class="tools-bar">
+      <button class="btn btn-secondary" onclick="exportJSON()" style="font-size:0.78rem;padding:8px 16px;">⬇ Exporter JSON</button>
+      <label class="btn btn-secondary" style="font-size:0.78rem;padding:8px 16px;cursor:pointer;">
+        ⬆ Importer JSON
+        <input type="file" accept=".json" onchange="importJSON(event)" style="display:none;">
+      </label>
+      <button class="btn btn-secondary" onclick="exportCSV()" style="font-size:0.78rem;padding:8px 16px;">📊 Exporter CSV</button>
+    </div>
+
+    <div class="section-title">Historique des transactions</div>
+    <div class="filters">
+      <button class="filter-chip active" id="subFilterAll" onclick="setSubFilter('all', this)">Toutes les natures</button>
+      <button class="filter-chip" onclick="setSubFilter('debit', this)">Débits uniquement</button>
+      <button class="filter-chip" onclick="setSubFilter('credit', this)">Crédits uniquement</button>
+      <input class="search-input" id="searchInput" type="text" placeholder="🔍 Filtrer par libellé..." oninput="renderTable()">
+    </div>
+    <div class="table-wrap">
+      <div class="table-header">
+        <span>Date</span><span>Description</span><span>Catégorie</span>
+        <span>Compte</span><span style="text-align:right">Montant</span>
+        <span>Statut</span><span></span>
+      </div>
+      <div id="txList"></div>
+    </div>
+  </div>
+
+  <!-- ======= SECTIONS CIC ======= -->
+  <div id="cicView" style="display:none;">
+
+    <!-- COMPTE COURANT -->
+    <div class="cic-section active" id="sec-courant">
+      <div class="section-title">Compte Courant CIC</div>
+      <div class="soldes-grid" style="max-width:400px;">
+        <div class="solde-card cic">
+          <div class="solde-label">Solde Compte Courant</div>
+          <div class="solde-value" id="soldeCourant">0,00 €</div>
+          <div class="solde-sub" id="soldeCourantSub">— / —</div>
+        </div>
+      </div>
+      <div class="section-title">Saisie opération</div>
+      <div class="form-card">
+        <div class="form-grid">
+          <div class="field"><label>Date</label><input type="date" id="ccDate"></div>
+          <div class="field"><label>Description</label><input type="text" id="ccDesc" placeholder="ex: Courses Carrefour"></div>
+          <div class="field"><label>Montant (€)</label><input type="number" id="ccMontant" step="0.01" min="0" placeholder="0.00"></div>
+          <div class="field">
+            <label>Nature</label>
+            <select id="ccStatut">
+              <option value="debit">Débit (sortie)</option>
+              <option value="credit">Crédit (entrée)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Catégorie</label>
+            <select id="ccCat">
+              <option value="Alimentation">🛒 Alimentation</option>
+              <option value="Logement">🏠 Logement</option>
+              <option value="Transport">🚇 Transport</option>
+              <option value="Santé">💊 Santé</option>
+              <option value="Loisirs">🎭 Loisirs</option>
+              <option value="Restaurants">🍽️ Restaurants</option>
+              <option value="Shopping">🛍️ Shopping</option>
+              <option value="Abonnements">📱 Abonnements</option>
+              <option value="Salaire">💼 Salaire</option>
+              <option value="Remboursement">💸 Remboursement</option>
+              <option value="Autre">📦 Autre</option>
+            </select>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="addCourantTx()">+ Ajouter</button>
+          <button class="btn btn-secondary" onclick="resetCourantForm()">Réinitialiser</button>
+        </div>
+      </div>
+      <div class="section-title">Historique</div>
+      <div class="table-wrap">
+        <div class="table-header" style="grid-template-columns:100px 1fr 130px 120px 90px 50px;">
+          <span>Date</span><span>Description</span><span>Catégorie</span>
+          <span style="text-align:right">Montant</span><span>Statut</span><span></span>
+        </div>
+        <div id="courantList"></div>
+      </div>
+    </div>
+
+    <!-- LIVRET A -->
+    <div class="cic-section" id="sec-livreta">
+      <div class="section-title">Livret A — Vue d'ensemble</div>
+      <div class="soldes-grid" style="max-width:500px;">
+        <div class="solde-card livreta">
+          <div class="solde-label">Solde Livret A</div>
+          <div class="solde-value" id="soldeLivretA">0,00 €</div>
+          <div class="solde-sub" id="soldeLivretASub">0 enveloppe(s)</div>
+        </div>
+        <div class="solde-card" style="border-top:3px solid var(--border);">
+          <div class="solde-label">Hors enveloppes (libre)</div>
+          <div class="solde-value" style="color:var(--text-muted);font-size:1.5rem;" id="soldeLibreA">0,00 €</div>
+          <div class="solde-sub">Montant non alloué</div>
+        </div>
+      </div>
+
+      <div class="section-title">Mes Enveloppes</div>
+      <div class="enveloppes-grid" id="enveloppesGrid">
+        <!-- cartes injectées dynamiquement -->
+        <div class="envelope-add-card" onclick="openEnveloppeModal()">
+          <span class="envelope-add-icon">＋</span>
+          <span>Nouvelle enveloppe</span>
+        </div>
+      </div>
+
+      <div class="section-title">Alimenter / Retirer du Livret A</div>
+      <div class="form-card">
+        <div class="form-grid">
+          <div class="field"><label>Date</label><input type="date" id="laDate"></div>
+          <div class="field"><label>Description</label><input type="text" id="laDesc" placeholder="ex: Virement mensuel"></div>
+          <div class="field"><label>Montant (€)</label><input type="number" id="laMontant" step="0.01" min="0" placeholder="0.00"></div>
+          <div class="field">
+            <label>Nature</label>
+            <select id="laStatut">
+              <option value="credit">Dépôt (+)</option>
+              <option value="debit">Retrait (−)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Allouer à une enveloppe (optionnel)</label>
+            <select id="laEnveloppe">
+              <option value="">— Libre (non alloué) —</option>
+            </select>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn" style="background:#38bdf8;color:#0a0a0f;" onclick="addLivretATx()">+ Enregistrer</button>
+          <button class="btn btn-secondary" onclick="resetLivretAForm()">Réinitialiser</button>
+        </div>
+      </div>
+
+      <div class="section-title">Historique Livret A</div>
+      <div class="table-wrap">
+        <div class="table-header" style="grid-template-columns:100px 1fr 160px 120px 90px 50px;">
+          <span>Date</span><span>Description</span><span>Enveloppe</span>
+          <span style="text-align:right">Montant</span><span>Nature</span><span></span>
+        </div>
+        <div id="livretAList"></div>
+      </div>
+    </div>
+
+    <!-- LIVRET JEUNE -->
+    <div class="cic-section" id="sec-livretj">
+      <div class="section-title">Livret Jeune</div>
+      <div class="soldes-grid" style="max-width:400px;">
+        <div class="solde-card livretj">
+          <div class="solde-label">Solde Livret Jeune</div>
+          <div class="solde-value" id="soldeLivretJ">0,00 €</div>
+          <div class="solde-sub" id="soldeLivretJSub">— / —</div>
+        </div>
+      </div>
+      <div class="section-title">Saisie opération</div>
+      <div class="form-card">
+        <div class="form-grid">
+          <div class="field"><label>Date</label><input type="date" id="ljDate"></div>
+          <div class="field"><label>Description</label><input type="text" id="ljDesc" placeholder="ex: Virement épargne"></div>
+          <div class="field"><label>Montant (€)</label><input type="number" id="ljMontant" step="0.01" min="0" placeholder="0.00"></div>
+          <div class="field">
+            <label>Nature</label>
+            <select id="ljStatut">
+              <option value="credit">Dépôt (+)</option>
+              <option value="debit">Retrait (−)</option>
+            </select>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn" style="background:#fb923c;color:#0a0a0f;" onclick="addLivretJTx()">+ Enregistrer</button>
+          <button class="btn btn-secondary" onclick="resetLivretJForm()">Réinitialiser</button>
+        </div>
+      </div>
+      <div class="section-title">Historique Livret Jeune</div>
+      <div class="table-wrap">
+        <div class="table-header" style="grid-template-columns:100px 1fr 120px 90px 50px;">
+          <span>Date</span><span>Description</span>
+          <span style="text-align:right">Montant</span><span>Nature</span><span></span>
+        </div>
+        <div id="livretJList"></div>
+      </div>
+    </div>
+
+  </div><!-- fin #cicView -->
+
+  <!-- MODAL NOUVELLE ENVELOPPE -->
+  <div class="modal-overlay" id="enveloppeModal">
+    <div class="modal-box">
+      <button class="modal-close" onclick="closeEnveloppeModal()">×</button>
+      <div class="modal-title">✦ Nouvelle enveloppe</div>
+      <div class="modal-field">
+        <div class="field"><label>Nom du projet</label><input type="text" id="envNom" placeholder="ex: Voyage au Japon"></div>
+      </div>
+      <div class="modal-field">
+        <div class="field"><label>Emoji / icône</label><input type="text" id="envIcon" placeholder="✈️" maxlength="4"></div>
+      </div>
+      <div class="modal-field">
+        <div class="field"><label>Objectif (€) — optionnel</label><input type="number" id="envObjectif" step="0.01" min="0" placeholder="ex: 1200"></div>
+      </div>
+      <div class="btn-row" style="margin-top:8px;">
+        <button class="btn" style="background:#38bdf8;color:#0a0a0f;" onclick="saveEnveloppe()">Créer l'enveloppe</button>
+        <button class="btn btn-secondary" onclick="closeEnveloppeModal()">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // CONFIGURATION FIREBASE
+  const firebaseConfig = {
+    apiKey: "AIzaSyD51xYGMjCna0NosxFGZqD1xdfJ22y5T6I",
+    authDomain: "mes-finances-1afce.firebaseapp.com",
+    databaseURL: "https://mes-finances-1afce-default-rtdb.europe-west1.firebasedatabase.app/",
+    projectId: "mes-finances-1afce",
+    storageBucket: "mes-finances-1afce.firebasestorage.app",
+    messagingSenderId: "25511596591",
+    appId: "1:25511596591:web:01b123dd17e0ecb859ecda"
+  };
+
+  const STORAGE_KEY = 'mesfinances_v1';
+  let state = {
+    transactions: [],
+    soldeInitCIC: null,
+    soldeInitTR: null,
+    courantTx: [],
+    livretATx: [],
+    livretJTx: [],
+    enveloppes: []  // { id, nom, icon, objectif }
+  };
+
+  let currentActiveView = 'global';
+  let currentSubFilter = 'all';
+  let currentCicSection = 'courant';
+  let chartCat = null, chartMois = null;
+  let db = null, firebaseConnected = false;
+
+  // ─── INIT ───────────────────────────────────────────────
+  function initApp() {
+    document.getElementById('fDate').valueAsDate = new Date();
+    document.getElementById('ccDate').valueAsDate = new Date();
+    document.getElementById('laDate').valueAsDate = new Date();
+    document.getElementById('ljDate').valueAsDate = new Date();
+    document.getElementById('headerDate').textContent = new Date().toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+
+    try {
+      const localData = localStorage.getItem(STORAGE_KEY);
+      if (localData) {
+        const parsed = JSON.parse(localData);
+        if (parsed && parsed.transactions) mergeState(parsed);
+      }
+    } catch(e) {}
+
+    try {
+      if (typeof firebase !== 'undefined') {
         firebase.initializeApp(firebaseConfig);
-        const database = firebase.database();
+        db = firebase.database();
+        const t = setTimeout(() => { if (!firebaseConnected) { checkInitialSetupFields(); renderAll(); } }, 1500);
+        db.ref('finances').on('value', (snap) => {
+          firebaseConnected = true; clearTimeout(t);
+          const data = snap.val();
+          if (data) mergeState(data);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          checkInitialSetupFields(); renderAll();
+        }, () => { checkInitialSetupFields(); renderAll(); });
+      } else { checkInitialSetupFields(); renderAll(); }
+    } catch(err) { checkInitialSetupFields(); renderAll(); }
+  }
 
-        // Test rapide pour voir si ça marche
-        database.ref().on('value', (snapshot) => {
-            document.body.innerHTML = "<h1>Données reçues !</h1>";
-            console.log("Données Firebase :", snapshot.val());
-        });
-    </script>
+  function mergeState(data) {
+    state.transactions = data.transactions || [];
+    state.soldeInitCIC = data.soldeInitCIC !== undefined ? data.soldeInitCIC : null;
+    state.soldeInitTR  = data.soldeInitTR  !== undefined ? data.soldeInitTR  : null;
+    state.courantTx    = data.courantTx  || [];
+    state.livretATx    = data.livretATx  || [];
+    state.livretJTx    = data.livretJTx  || [];
+    state.enveloppes   = data.enveloppes || [];
+  }
+
+  // ─── NAVIGATION ONGLETS PRINCIPAUX ───────────────────────
+  function switchView(viewName) {
+    currentActiveView = viewName;
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-view') === viewName);
+    });
+
+    const cicSubNav = document.getElementById('cicSubNav');
+    const commonView = document.getElementById('commonView');
+    const cicView    = document.getElementById('cicView');
+
+    if (viewName === 'CIC') {
+      commonView.style.display = 'none';
+      cicView.style.display = 'block';
+      cicSubNav.classList.add('visible');
+      renderCicSection();
+    } else {
+      commonView.style.display = 'block';
+      cicView.style.display = 'none';
+      cicSubNav.classList.remove('visible');
+
+      const cardGlobal = document.getElementById('card_global');
+      const cardCIC    = document.getElementById('card_CIC');
+      const cardTR     = document.getElementById('card_TR');
+
+      if (viewName === 'global') {
+        cardGlobal.style.display = 'block'; cardCIC.style.display = 'block'; cardTR.style.display = 'block';
+      } else if (viewName === 'TR') {
+        cardGlobal.style.display = 'none'; cardCIC.style.display = 'none'; cardTR.style.display = 'block';
+        document.getElementById('fCompte').value = 'TR';
+      }
+      render();
+    }
+  }
+
+  // ─── NAVIGATION SOUS-ONGLETS CIC ─────────────────────────
+  function switchCicSection(section, btn) {
+    currentCicSection = section;
+    document.querySelectorAll('.sub-tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.cic-section').forEach(s => s.classList.remove('active'));
+    document.getElementById('sec-' + section).classList.add('active');
+    renderCicSection();
+  }
+
+  function renderCicSection() {
+    if (currentCicSection === 'courant') renderCourant();
+    if (currentCicSection === 'livreta') renderLivretA();
+    if (currentCicSection === 'livretj') renderLivretJ();
+  }
+
+  // ─── COMPTE COURANT ───────────────────────────────────────
+  function addCourantTx() {
+    const date   = document.getElementById('ccDate').value;
+    const desc   = document.getElementById('ccDesc').value.trim();
+    const montant= parseFloat(document.getElementById('ccMontant').value);
+    const statut = document.getElementById('ccStatut').value;
+    const cat    = document.getElementById('ccCat').value;
+    if (!date || !desc || isNaN(montant) || montant <= 0) { toast('⚠ Remplis tous les champs.'); return; }
+    state.courantTx.unshift({ id: Date.now(), date, desc, montant, statut, cat });
+    save(); renderCourant(); resetCourantForm(); toast('✓ Opération ajoutée.');
+  }
+
+  function resetCourantForm() {
+    document.getElementById('ccDate').valueAsDate = new Date();
+    document.getElementById('ccDesc').value = '';
+    document.getElementById('ccMontant').value = '';
+    document.getElementById('ccStatut').value = 'debit';
+  }
+
+  function deleteCourantTx(id) {
+    state.courantTx = state.courantTx.filter(t => t.id !== id);
+    save(); renderCourant(); toast('Supprimé.');
+  }
+
+  function renderCourant() {
+    let solde = 0, deb = 0, cred = 0;
+    state.courantTx.forEach(t => {
+      if (t.statut === 'credit') { solde += t.montant; cred += t.montant; }
+      else { solde -= t.montant; deb += t.montant; }
+    });
+    document.getElementById('soldeCourant').textContent = fmt(solde);
+    document.getElementById('soldeCourantSub').textContent = `−${fmt(deb)} / +${fmt(cred)}`;
+
+    const list = document.getElementById('courantList');
+    if (!state.courantTx.length) { list.innerHTML = `<div class="empty-state">Aucune opération enregistrée.</div>`; return; }
+    list.innerHTML = state.courantTx.map(t => `
+      <div class="livret-tx-row" style="grid-template-columns:100px 1fr 130px 120px 90px 50px;">
+        <span class="tx-date">${formatDate(t.date)}</span>
+        <span class="tx-desc">${t.desc}</span>
+        <span class="tx-cat">${t.cat}</span>
+        <span class="tx-montant ${t.statut}" style="text-align:right">${t.statut==='debit'?'−':'+'}${fmt(t.montant)}</span>
+        <span><span class="badge badge-${t.statut}">${t.statut==='debit'?'Débit':'Crédit'}</span></span>
+        <span><button class="btn-del" onclick="deleteCourantTx(${t.id})">×</button></span>
+      </div>`).join('');
+  }
+
+  // ─── ENVELOPPES ───────────────────────────────────────────
+  function openEnveloppeModal() {
+    document.getElementById('envNom').value = '';
+    document.getElementById('envIcon').value = '';
+    document.getElementById('envObjectif').value = '';
+    document.getElementById('enveloppeModal').classList.add('open');
+    document.getElementById('envNom').focus();
+  }
+  function closeEnveloppeModal() {
+    document.getElementById('enveloppeModal').classList.remove('open');
+  }
+
+  function saveEnveloppe() {
+    const nom = document.getElementById('envNom').value.trim();
+    if (!nom) { toast('⚠ Nomme ton projet.'); return; }
+    const icon = document.getElementById('envIcon').value.trim() || '📁';
+    const objectif = parseFloat(document.getElementById('envObjectif').value) || null;
+    state.enveloppes.push({ id: Date.now(), nom, icon, objectif });
+    save(); closeEnveloppeModal(); renderLivretA(); toast('✓ Enveloppe créée !');
+  }
+
+  function deleteEnveloppe(id) {
+    if (!confirm('Supprimer cette enveloppe ? Les mouvements associés resteront dans l\'historique.')) return;
+    state.enveloppes = state.enveloppes.filter(e => e.id !== id);
+    // Detach tx from deleted envelope
+    state.livretATx.forEach(t => { if (t.enveloppe == id) t.enveloppe = ''; });
+    save(); renderLivretA(); toast('Enveloppe supprimée.');
+  }
+
+  // ─── LIVRET A ─────────────────────────────────────────────
+  function addLivretATx() {
+    const date     = document.getElementById('laDate').value;
+    const desc     = document.getElementById('laDesc').value.trim();
+    const montant  = parseFloat(document.getElementById('laMontant').value);
+    const statut   = document.getElementById('laStatut').value;
+    const enveloppe= document.getElementById('laEnveloppe').value;
+    if (!date || !desc || isNaN(montant) || montant <= 0) { toast('⚠ Remplis tous les champs.'); return; }
+    state.livretATx.unshift({ id: Date.now(), date, desc, montant, statut, enveloppe });
+    save(); renderLivretA(); resetLivretAForm(); toast('✓ Mouvement enregistré.');
+  }
+
+  function resetLivretAForm() {
+    document.getElementById('laDate').valueAsDate = new Date();
+    document.getElementById('laDesc').value = '';
+    document.getElementById('laMontant').value = '';
+    document.getElementById('laStatut').value = 'credit';
+    document.getElementById('laEnveloppe').value = '';
+  }
+
+  function deleteLivretATx(id) {
+    state.livretATx = state.livretATx.filter(t => t.id !== id);
+    save(); renderLivretA(); toast('Supprimé.');
+  }
+
+  function renderLivretA() {
+    // Calculer le solde total
+    let solde = 0;
+    state.livretATx.forEach(t => {
+      solde += t.statut === 'credit' ? t.montant : -t.montant;
+    });
+
+    // Calculer les montants par enveloppe
+    const envMap = {};
+    state.enveloppes.forEach(e => envMap[e.id] = 0);
+    state.livretATx.forEach(t => {
+      if (t.enveloppe && envMap[t.enveloppe] !== undefined) {
+        envMap[t.enveloppe] += t.statut === 'credit' ? t.montant : -t.montant;
+      }
+    });
+
+    const totalAlloue = Object.values(envMap).reduce((a, v) => a + Math.max(0, v), 0);
+    const libre = solde - totalAlloue;
+
+    document.getElementById('soldeLivretA').textContent = fmt(solde);
+    document.getElementById('soldeLivretASub').textContent = `${state.enveloppes.length} enveloppe(s) · ${fmt(totalAlloue)} alloué(s)`;
+    document.getElementById('soldeLibreA').textContent = fmt(libre);
+
+    // Mise à jour du select d'enveloppe dans le formulaire
+    const sel = document.getElementById('laEnveloppe');
+    const current = sel.value;
+    sel.innerHTML = `<option value="">— Libre (non alloué) —</option>` +
+      state.enveloppes.map(e => `<option value="${e.id}">${e.icon} ${e.nom}</option>`).join('');
+    if (current) sel.value = current;
+
+    // Rendu des cartes enveloppe
+    const grid = document.getElementById('enveloppesGrid');
+    const cards = state.enveloppes.map(e => {
+      const montantEnv = Math.max(0, envMap[e.id] || 0);
+      const pct = e.objectif ? Math.min(100, (montantEnv / e.objectif) * 100).toFixed(0) : null;
+      return `
+        <div class="envelope-card">
+          <button class="envelope-del" onclick="deleteEnveloppe(${e.id})">×</button>
+          <div class="envelope-icon">${e.icon}</div>
+          <div class="envelope-name">${e.nom}</div>
+          <div class="envelope-amount">${fmt(montantEnv)}</div>
+          ${e.objectif ? `
+            <div class="envelope-progress"><div class="envelope-progress-bar" style="width:${pct}%"></div></div>
+            <div class="envelope-goal">${pct}% · objectif ${fmt(e.objectif)}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    grid.innerHTML = cards + `
+      <div class="envelope-add-card" onclick="openEnveloppeModal()">
+        <span class="envelope-add-icon">＋</span>
+        <span>Nouvelle enveloppe</span>
+      </div>`;
+
+    // Historique
+    const list = document.getElementById('livretAList');
+    if (!state.livretATx.length) { list.innerHTML = `<div class="empty-state">Aucun mouvement enregistré.</div>`; return; }
+    list.innerHTML = state.livretATx.map(t => {
+      const env = state.enveloppes.find(e => e.id == t.enveloppe);
+      const envLabel = env ? `${env.icon} ${env.nom}` : '—';
+      return `
+        <div class="livret-tx-row" style="grid-template-columns:100px 1fr 160px 120px 90px 50px;">
+          <span class="tx-date">${formatDate(t.date)}</span>
+          <span class="tx-desc">${t.desc}</span>
+          <span class="tx-cat">${envLabel}</span>
+          <span class="tx-montant ${t.statut}" style="text-align:right">${t.statut==='debit'?'−':'+'}${fmt(t.montant)}</span>
+          <span><span class="badge badge-${t.statut}">${t.statut==='debit'?'Retrait':'Dépôt'}</span></span>
+          <span><button class="btn-del" onclick="deleteLivretATx(${t.id})">×</button></span>
+        </div>`;
+    }).join('');
+  }
+
+  // ─── LIVRET JEUNE ─────────────────────────────────────────
+  function addLivretJTx() {
+    const date   = document.getElementById('ljDate').value;
+    const desc   = document.getElementById('ljDesc').value.trim();
+    const montant= parseFloat(document.getElementById('ljMontant').value);
+    const statut = document.getElementById('ljStatut').value;
+    if (!date || !desc || isNaN(montant) || montant <= 0) { toast('⚠ Remplis tous les champs.'); return; }
+    state.livretJTx.unshift({ id: Date.now(), date, desc, montant, statut });
+    save(); renderLivretJ(); resetLivretJForm(); toast('✓ Mouvement enregistré.');
+  }
+
+  function resetLivretJForm() {
+    document.getElementById('ljDate').valueAsDate = new Date();
+    document.getElementById('ljDesc').value = '';
+    document.getElementById('ljMontant').value = '';
+    document.getElementById('ljStatut').value = 'credit';
+  }
+
+  function deleteLivretJTx(id) {
+    state.livretJTx = state.livretJTx.filter(t => t.id !== id);
+    save(); renderLivretJ(); toast('Supprimé.');
+  }
+
+  function renderLivretJ() {
+    let solde = 0, deb = 0, cred = 0;
+    state.livretJTx.forEach(t => {
+      if (t.statut === 'credit') { solde += t.montant; cred += t.montant; }
+      else { solde -= t.montant; deb += t.montant; }
+    });
+    document.getElementById('soldeLivretJ').textContent = fmt(solde);
+    document.getElementById('soldeLivretJSub').textContent = `−${fmt(deb)} / +${fmt(cred)}`;
+
+    const list = document.getElementById('livretJList');
+    if (!state.livretJTx.length) { list.innerHTML = `<div class="empty-state">Aucun mouvement enregistré.</div>`; return; }
+    list.innerHTML = state.livretJTx.map(t => `
+      <div class="livret-tx-row" style="grid-template-columns:100px 1fr 120px 90px 50px;">
+        <span class="tx-date">${formatDate(t.date)}</span>
+        <span class="tx-desc">${t.desc}</span>
+        <span class="tx-montant ${t.statut}" style="text-align:right">${t.statut==='debit'?'−':'+'}${fmt(t.montant)}</span>
+        <span><span class="badge badge-${t.statut}">${t.statut==='debit'?'Retrait':'Dépôt'}</span></span>
+        <span><button class="btn-del" onclick="deleteLivretJTx(${t.id})">×</button></span>
+      </div>`).join('');
+  }
+
+  // ─── LOGIQUE GLOBALE (inchangée) ──────────────────────────
+  function setSubFilter(subf, el) {
+    currentSubFilter = subf;
+    document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+    renderTable();
+  }
+
+  function checkInitialSetupFields() {
+    if (state.soldeInitCIC === null || state.soldeInitTR === null) {
+      document.getElementById('initSoldes').style.display = 'block';
+    } else { document.getElementById('initSoldes').style.display = 'none'; }
+  }
+
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (db && firebaseConnected) {
+      db.ref('finances').set(state).catch(e => console.error(e));
+    }
+  }
+
+  function saveSoldesInit() {
+    const cic = parseFloat(document.getElementById('initCIC').value);
+    const tr  = parseFloat(document.getElementById('initTR').value);
+    if (isNaN(cic) || isNaN(tr)) { toast('⚠ Saisis les deux soldes.'); return; }
+    state.soldeInitCIC = cic; state.soldeInitTR = tr;
+    save(); render(); checkInitialSetupFields(); toast('✓ Soldes initiaux enregistrés.');
+  }
+
+  function addTransaction() {
+    const date   = document.getElementById('fDate').value;
+    const desc   = document.getElementById('fDesc').value.trim();
+    const montant= parseFloat(document.getElementById('fMontant').value);
+    const statut = document.getElementById('fStatut').value;
+    const compte = document.getElementById('fCompte').value;
+    const cat    = document.getElementById('fCat').value;
+    if (!date || !desc || isNaN(montant) || montant <= 0) { toast('⚠ Remplis tous les champs.'); return; }
+    state.transactions.unshift({ id: Date.now(), date, desc, montant, statut, compte, cat });
+    save(); render(); resetForm(); toast('✓ Transaction ajoutée.');
+  }
+
+  function deleteTransaction(id) {
+    state.transactions = state.transactions.filter(t => t.id !== id);
+    save(); render(); toast('Transaction supprimée.');
+  }
+
+  function resetForm() {
+    document.getElementById('fDesc').value = '';
+    document.getElementById('fMontant').value = '';
+    document.getElementById('fDate').valueAsDate = new Date();
+    document.getElementById('fStatut').value = 'debit';
+    document.getElementById('fCompte').value = currentActiveView === 'global' ? 'CIC' : currentActiveView;
+  }
+
+  function computeSoldes() {
+    let cic = state.soldeInitCIC ?? 0;
+    let tr  = state.soldeInitTR  ?? 0;
+    let cicDebits = 0, cicCredits = 0, trDebits = 0, trCredits = 0;
+    for (const t of state.transactions) {
+      const sign = t.statut === 'credit' ? 1 : -1;
+      if (t.compte === 'CIC') {
+        cic += sign * t.montant;
+        if (t.statut === 'debit') cicDebits += t.montant; else cicCredits += t.montant;
+      } else {
+        tr += sign * t.montant;
+        if (t.statut === 'debit') trDebits += t.montant; else trCredits += t.montant;
+      }
+    }
+    return { cic, tr, total: cic + tr, cicDebits, cicCredits, trDebits, trCredits };
+  }
+
+  function fmt(n) { return new Intl.NumberFormat('fr-FR', { style:'currency', currency:'EUR' }).format(n); }
+
+  function updateSoldes() {
+    const s = computeSoldes();
+    document.getElementById('soldeCIC').textContent   = fmt(s.cic);
+    document.getElementById('soldeTR').textContent    = fmt(s.tr);
+    document.getElementById('soldeTotal').textContent = fmt(s.total);
+    document.getElementById('soldeCICSub').textContent   = `−${fmt(s.cicDebits)} / +${fmt(s.cicCredits)}`;
+    document.getElementById('soldeTRSub').textContent    = `−${fmt(s.trDebits)} / +${fmt(s.trCredits)}`;
+    document.getElementById('soldeTotalSub').textContent = `${state.transactions.length} transaction(s) au total`;
+  }
+
+  function filteredTx() {
+    const q = document.getElementById('searchInput').value.toLowerCase();
+    return state.transactions.filter(t => {
+      const matchView   = currentActiveView === 'global' || t.compte === currentActiveView;
+      const matchSub    = currentSubFilter === 'all' || t.statut === currentSubFilter;
+      const matchSearch = !q || t.desc.toLowerCase().includes(q) || t.cat.toLowerCase().includes(q);
+      return matchView && matchSub && matchSearch;
+    });
+  }
+
+  function renderTable() {
+    const list = document.getElementById('txList');
+    const txs  = filteredTx();
+    if (txs.length === 0) { list.innerHTML = `<div class="empty-state">Aucune opération enregistrée pour ce contexte.</div>`; return; }
+    list.innerHTML = txs.map(t => `
+      <div class="tx-row">
+        <span class="tx-date">${formatDate(t.date)}</span>
+        <span class="tx-desc">${t.desc}</span>
+        <span class="tx-cat">${t.cat}</span>
+        <span class="tx-compte"><span class="dot dot-${t.compte==='CIC'?'cic':'tr'}"></span>${t.compte==='TR'?'Trade Rep.':t.compte}</span>
+        <span class="tx-montant ${t.statut}">${t.statut==='debit'?'−':'+'}${fmt(t.montant)}</span>
+        <span class="tx-statut"><span class="badge badge-${t.statut}">${t.statut==='debit'?'Débit':'Crédit'}</span></span>
+        <span class="tx-actions"><button class="btn-del" onclick="deleteTransaction(${t.id})">×</button></span>
+      </div>`).join('');
+  }
+
+  function formatDate(d) { if (!d) return '—'; const [y, m, j] = d.split('-'); return `${j}/${m}/${y.slice(2)}`; }
+
+  const PALETTE = ['#00d4aa','#f0a500','#ff4d6d','#a78bfa','#38bdf8','#fb923c','#34d399','#f472b6'];
+
+  function updateCharts() {
+    const cats = {};
+    for (const t of state.transactions) {
+      const matchAccount = currentActiveView === 'global' || t.compte === currentActiveView;
+      if (matchAccount && t.statut === 'debit') cats[t.cat] = (cats[t.cat] || 0) + t.montant;
+    }
+    document.getElementById('chartCatTitle').textContent =
+      currentActiveView === 'global' ? "Dépenses globales par catégorie" : `Dépenses ${currentActiveView} par catégorie`;
+
+    if (chartCat) chartCat.destroy();
+    const ctxCat = document.getElementById('chartCat');
+    if (ctxCat) {
+      chartCat = new Chart(ctxCat, {
+        type: 'doughnut',
+        data: { labels: Object.keys(cats), datasets: [{ data: Object.values(cats), backgroundColor: PALETTE, borderWidth: 0 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#6b6b8a', font: { family: 'DM Mono', size: 10 } } } } }
+      });
+    }
+
+    const now = new Date(); const months = []; const debitsM = []; const creditsM = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      months.push(d.toLocaleDateString('fr-FR', { month:'short' }));
+      let deb = 0, cred = 0;
+      for (const t of state.transactions) {
+        const matchAccount = currentActiveView === 'global' || t.compte === currentActiveView;
+        if (matchAccount && t.date && t.date.startsWith(key)) {
+          if (t.statut === 'debit') deb += t.montant; else cred += t.montant;
+        }
+      }
+      debitsM.push(deb); creditsM.push(cred);
+    }
+    if (chartMois) chartMois.destroy();
+    const ctxMois = document.getElementById('chartMois');
+    if (ctxMois) {
+      chartMois = new Chart(ctxMois, {
+        type: 'bar',
+        data: { labels: months, datasets: [{ label: 'Débits', data: debitsM, backgroundColor: 'rgba(255,77,109,0.7)' }, { label: 'Crédits', data: creditsM, backgroundColor: 'rgba(0,212,170,0.7)' }] },
+        options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { color: '#6b6b8a' } }, y: { ticks: { color: '#6b6b8a' } } } }
+      });
+    }
+  }
+
+  function exportJSON() {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `mes-finances-${new Date().toISOString().slice(0,10)}.json`; a.click();
+  }
+
+  function importJSON(e) {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (data.transactions) { mergeState(data); save(); renderAll(); checkInitialSetupFields(); toast('✓ Importation réussie !'); }
+      } catch { toast('⚠ Fichier JSON invalide.'); }
+    };
+    reader.readAsText(file);
+  }
+
+  function exportCSV() {
+    const header = 'Date,Description,Catégorie,Compte,Statut,Montant\n';
+    const rows = state.transactions.map(t => `${t.date},"${t.desc}",${t.cat},${t.compte},${t.statut},${t.montant}`).join('\n');
+    const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `mes-finances-${new Date().toISOString().slice(0,10)}.csv`; a.click();
+  }
+
+  function render() { updateSoldes(); updateCharts(); renderTable(); }
+  function renderAll() { render(); renderCicSection(); }
+  function toast(msg) { const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg; document.body.appendChild(el); setTimeout(() => el.remove(), 2800); }
+
+  window.addEventListener('DOMContentLoaded', initApp);
+</script>
 </body>
 </html>
